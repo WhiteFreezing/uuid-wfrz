@@ -117,7 +117,7 @@ function ProfileCard({ p }: { p: Profile }) {
   const dashed = `${p.id.slice(0,8)}-${p.id.slice(8,12)}-${p.id.slice(12,16)}-${p.id.slice(16,20)}-${p.id.slice(20)}`;
   return (
     <div className="card p-5 flex gap-5 items-start flex-wrap">
-      <img src={`https://crafatar.com/renders/body/${p.id}?overlay=true`} alt={p.name} width={64} height={144} className="rounded-lg" />
+      <img src={`https://mc-heads.net/body/${p.id}/144`} alt={p.name} width={64} height={144} className="rounded-lg" />
       <div className="flex-1 min-w-0 space-y-2">
         <div className="text-2xl font-extrabold">{p.name}</div>
         {p.legacy && <span className="chip">legacy account</span>}
@@ -125,7 +125,7 @@ function ProfileCard({ p }: { p: Profile }) {
         <CopyRow label="UUID (trimmed)" value={p.id} />
         <CopyRow label="UUID (dashed)" value={dashed} />
         <CopyRow label="NameMC link" value={`https://namemc.com/profile/${p.id}`} />
-        <CopyRow label="Skin URL (Crafatar)" value={`https://crafatar.com/skins/${p.id}`} />
+        <CopyRow label="Skin URL (mc-heads)" value={`https://mc-heads.net/skin/${p.id}`} />
       </div>
     </div>
   );
