@@ -2,12 +2,18 @@
 
 import { useState } from "react";
 
-type Profile = { id: string; name: string; legacy?: boolean; demo?: boolean };
+type Profile = { id: string; name: string; legacy?: boolean; demo?: boolean; created_at?: string };
 
-// Public Mojang API endpoints — CORS-enabled, no auth.
-const API_NAME    = "https://api.mojang.com/users/profiles/minecraft";
-const API_BULK    = "https://api.mojang.com/profiles/minecraft";
-const API_HISTORY = "https://sessionserver.mojang.com/session/minecraft/profile"; // /<uuid>?unsigned=false
+// Browser-friendly Mojang mirror — Mojang's own api.mojang.com lacks CORS
+// headers so direct browser fetch is blocked. Ashcon's API is a CORS-enabled
+// pass-through to Mojang's data, used by NameMC and many others.
+//   GET /v2/user/<name-or-uuid>  → full profile incl skin + history
+//   GET /v2/uuid/<name>          → just the UUID
+const ASHCON = "https://api.ashcon.app/mojang/v2/user";
+
+// playerdb.co is the fallback for bulk lookups — Ashcon serves only single
+// profiles. CORS-enabled, free, no auth.
+const PLAYERDB = "https://playerdb.co/api/player/minecraft";
 
 export default function HomePage() {
   const [mode, setMode] = useState<"single" | "bulk">("single");
@@ -20,16 +26,16 @@ export default function HomePage() {
           MC UUID lookup<span className="text-brand">.</span>
         </h1>
         <p className="text-dim mt-3 max-w-2xl">
-          Mojang's public API in your browser. Convert usernames ↔ UUIDs, see
-          skins, dump CSVs for bulk whitelist migration. No tracking, no rate-
-          limit headaches on the API side (we hit them directly from your tab).
+          Convert Minecraft usernames ↔ UUIDs, see skins, dump TSVs for bulk
+          whitelist migration. Resolves via the CORS-enabled Ashcon + PlayerDB
+          mirrors of Mojang's profile API — direct from your tab, no proxy.
         </p>
       </header>
 
       <section className="max-w-5xl mx-auto px-5 pt-6 pb-24 space-y-5">
         <div className="card p-2 flex gap-1.5 w-fit">
           <Tab on={mode === "single"} onClick={() => setMode("single")}>Single lookup</Tab>
-          <Tab on={mode === "bulk"} onClick={() => setMode("bulk")}>Bulk (up to 10 / request)</Tab>
+          <Tab on={mode === "bulk"} onClick={() => setMode("bulk")}>Bulk (5 parallel)</Tab>
         </div>
         {mode === "single" ? <Single /> : <Bulk />}
 
@@ -51,7 +57,7 @@ export default function HomePage() {
 
       <footer className="border-t border-border/70 py-8 text-sm text-dim">
         <div className="max-w-5xl mx-auto px-5 flex items-center justify-between flex-wrap gap-4">
-          <div>Powered by Mojang's public API. No tracking.</div>
+          <div>Powered by <a className="hover:text-text" href="https://github.com/Electroid/mojang-api" target="_blank" rel="noopener">Ashcon</a> + <a className="hover:text-text" href="https://playerdb.co" target="_blank" rel="noopener">PlayerDB</a> mirrors of the Mojang profile API. No tracking.</div>
           <a href="https://github.com/WhiteFreezing/uuid-wfrz" target="_blank" rel="noopener" className="hover:text-text">GitHub →</a>
         </div>
       </footer>
@@ -68,22 +74,16 @@ function Single() {
   async function go() {
     setLoading(true); setErr(""); setData(null);
     try {
-      const isUuid = /^[0-9a-f]{32}$|^[0-9a-f-]{36}$/i.test(q.trim());
-      let p: Profile | null = null;
-      if (isUuid) {
-        const id = q.replace(/-/g, "");
-        const r = await fetch(`${API_HISTORY}/${id}`);
-        if (r.status === 404 || r.status === 204) throw new Error("UUID not found");
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j = await r.json();
-        p = { id: j.id, name: j.name };
-      } else {
-        const r = await fetch(`${API_NAME}/${encodeURIComponent(q.trim())}`);
-        if (r.status === 404 || r.status === 204) throw new Error("Username not found");
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        p = await r.json();
-      }
-      setData(p);
+      const r = await fetch(`${ASHCON}/${encodeURIComponent(q.trim())}`);
+      if (r.status === 404) throw new Error("Profile not found");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      // Ashcon's format: { uuid: 'xxxx-xxxx-...', username: 'Name', created_at: '2010-01-10', ... }
+      setData({
+        id: (j.uuid as string).replace(/-/g, ""),
+        name: j.username,
+        created_at: j.created_at,
+      });
     } catch (e: any) {
       setErr(e.message || "Lookup failed");
     } finally {
@@ -141,29 +141,27 @@ function Bulk() {
     if (!names.length) return;
     setLoading(true);
     const all: { name: string; id?: string; error?: string }[] = names.map((n) => ({ name: n }));
-    // POST in chunks of 10 (Mojang limit)
-    for (let i = 0; i < names.length; i += 10) {
-      const chunk = names.slice(i, i + 10);
-      try {
-        const r = await fetch(API_BULK, {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify(chunk),
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j: { id: string; name: string }[] = await r.json();
-        const map = new Map(j.map(x => [x.name.toLowerCase(), x.id]));
-        chunk.forEach((n) => {
-          const idx = all.findIndex(x => x.name === n);
-          const id = map.get(n.toLowerCase());
-          if (id) all[idx].id = id;
-          else all[idx].error = "not found";
-        });
-      } catch (e: any) {
-        chunk.forEach((n) => {
-          const idx = all.findIndex(x => x.name === n);
+    setRows([...all]);
+    // Ashcon serves one profile per request — parallelise in batches of 5 to
+    // avoid pummeling them; tradeoff vs Mojang's old 10-per-POST bulk endpoint.
+    const BATCH = 5;
+    for (let i = 0; i < names.length; i += BATCH) {
+      const chunk = names.slice(i, i + BATCH);
+      await Promise.all(chunk.map(async (n) => {
+        const idx = all.findIndex(x => x.name === n);
+        try {
+          const r = await fetch(`${PLAYERDB}/${encodeURIComponent(n)}`);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const j = await r.json();
+          if (j.code === "player.found" && j.data?.player?.id) {
+            all[idx].id = j.data.player.id.replace(/-/g, "");
+          } else {
+            all[idx].error = "not found";
+          }
+        } catch (e: any) {
           all[idx].error = e.message;
-        });
-      }
+        }
+      }));
       setRows([...all]);
     }
     setLoading(false);
