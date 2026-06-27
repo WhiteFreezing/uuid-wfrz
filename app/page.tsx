@@ -42,14 +42,19 @@ export default function HomePage() {
         <details className="card p-5">
           <summary className="cursor-pointer text-sm font-semibold">About the data</summary>
           <div className="mt-3 text-sm text-dim space-y-2">
-            <p>Hits <code className="text-brand">api.mojang.com</code> and
-              <code className="text-brand">sessionserver.mojang.com</code> directly from your browser.
-              Mojang's CORS-enabled public endpoints — no proxy in between.</p>
-            <p>Rate limit (per IP): ~600 req/10 min for the bulk endpoint, faster for single lookups.
-              Pace yourself if you're scripting against a server export.</p>
+            <p>Mojang's own <code className="text-brand">api.mojang.com</code> and
+              <code className="text-brand"> sessionserver.mojang.com</code> don't send CORS headers,
+              so direct browser fetch from any other origin is blocked. We hit two free
+              public mirrors instead — both proxy the same data, both CORS-enabled, no auth:</p>
+            <ul className="list-disc ml-6 space-y-1">
+              <li><a className="text-brand hover:underline" href="https://github.com/Electroid/mojang-api" target="_blank" rel="noopener">Ashcon</a>
+                — single profile lookups (incl. skin / cape URLs + account creation date)</li>
+              <li><a className="text-brand hover:underline" href="https://playerdb.co" target="_blank" rel="noopener">PlayerDB</a>
+                — bulk parallel lookups, 5 at a time</li>
+            </ul>
             <p>UUID format conversion: Mojang returns the "trimmed" form
-              <code className="text-brand">8a1f7c1c5b94493a8a1d7f5e0f0e1e2f</code>. The dashed form
-              <code className="text-brand">8a1f7c1c-5b94-493a-8a1d-7f5e0f0e1e2f</code> is what bukkit.yml
+              <code className="text-brand"> 8a1f7c1c5b94493a8a1d7f5e0f0e1e2f</code>. The dashed form
+              <code className="text-brand"> 8a1f7c1c-5b94-493a-8a1d-7f5e0f0e1e2f</code> is what bukkit.yml
               and most plugins expect.</p>
           </div>
         </details>
